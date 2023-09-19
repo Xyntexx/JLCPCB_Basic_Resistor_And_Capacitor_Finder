@@ -115,8 +115,9 @@ class MainWindow(QMainWindow):
         value = self.output_table.item(row, COLUMNS.index("value")).text()
         package = self.output_table.item(row, COLUMNS.index("package")).text()
         lcsc = self.output_table.item(row, COLUMNS.index("lcsc")).text()
+        voltage = self.output_table.item(row, COLUMNS.index("voltage")).text()
         if self.radio1.isChecked():
-            symbol = createCapacitorSymbol(value, package, lcsc, "")
+            symbol = createCapacitorSymbol(value, package, lcsc, voltage)
         else:
             symbol = createResistorSymbol(value, package, lcsc)
         # add symbol to clipboard
