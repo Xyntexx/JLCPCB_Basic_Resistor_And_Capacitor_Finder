@@ -89,7 +89,7 @@ def createResistorSymbol(value, package, lcsc):
 
 
 def createCapacitorSymbol(value, package, lcsc, voltage):
-    package_lib = packages_R[package]
+    package_lib = packages_C[package]
     value = convertToShorthandNotation(value)
     s = f"""(lib_symbols
   (symbol "Device:C_Small" (pin_numbers hide) (pin_names (offset 0.254) hide) (in_bom yes) (on_board yes)
