@@ -1,0 +1,36 @@
+# Documentation
+*.md
+CLI_USAGE.md
+
+# Component data
+components.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Project specific
+cache.sqlite3
+cache.z*
+cache.zip
+output.kicad_sym
+output.txt
+output.xlsx
+test_output.kicad_sym
+requirements.txt
+search_database.py
