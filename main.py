@@ -114,7 +114,8 @@ class MainWindow(QMainWindow):
     def update_table(self):
         if not self.db.status():
             return
-        if self.radio1.isChecked():
+        is_capacitor = self.radio1.isChecked()
+        if is_capacitor:
             try:
                 results = self.db.get_capacitors(self.value_input.text(), self.package_input.text())
             except ValueInvalid:
@@ -134,6 +135,11 @@ class MainWindow(QMainWindow):
                 return
         self.value_input.setStyleSheet("")
         self.package_input.setStyleSheet("")
+
+        # Hide voltage column for resistors, show for capacitors
+        voltage_col_index = COLUMNS.index("voltage")
+        self.output_table.setColumnHidden(voltage_col_index, not is_capacitor)
+
         self.output_table.setRowCount(len(results))
         for i, row_dict in enumerate(results):
             for j, col_name in enumerate(COLUMNS):
