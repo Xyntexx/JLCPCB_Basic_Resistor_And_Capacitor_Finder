@@ -28,6 +28,7 @@ build/
 cache.sqlite3
 cache.z*
 cache.zip
+cache_downloads/
 output.kicad_sym
 output.txt
 output.xlsx
