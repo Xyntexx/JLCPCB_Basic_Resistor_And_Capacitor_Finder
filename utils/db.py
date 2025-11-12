@@ -1,5 +1,5 @@
 import decimal, pathlib
-import sqlite3, openpyxl
+import sqlite3
 import pandas as pd
 from utils.units import convertToBaseUnits, convertToPrefix
 import create_database
@@ -48,8 +48,13 @@ class JLCPCBDatabase:
         return created
 
     def update(self):
+        if hasattr(self, 'db'):
+            self.db.close()
         create_database.download_files()
         create_database.create_database()
+        #update the database updated time
+        self.optimize()
+        self.open()
 
     def open(self):
         if not self.status():
@@ -79,6 +84,17 @@ class JLCPCBDatabase:
         self.capacitors['voltage'] = self.capacitors['description'].apply(getUnitValue, unit="V", force_unit=True)
         # remove all other columns except value and package
         self.capacitors = self.capacitors[COLUMNS]
+
+    def optimize(self):
+        print("Optimizing database")
+        if not self.status():
+            raise FileNotFoundError("Database not found")
+        db = sqlite3.connect(self.db_path)
+        # delete everything except basic components
+        db.execute("DELETE FROM components WHERE basic = 0")
+        db.commit()
+        db.close()
+        print("Database optimized")
 
     def get_tables(self):
         self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
@@ -138,7 +154,3 @@ class JLCPCBDatabase:
 
     def get_basic(self):
         return self.basic
-
-    def save_to_excel(self, filename):
-        self.basic.to_excel(filename)
-
