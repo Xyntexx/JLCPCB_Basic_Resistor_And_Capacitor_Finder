@@ -1,5 +1,4 @@
 # crate a gui that finds the correct resistor or capacitor
-import re
 from datetime import datetime
 
 from PyQt6.QtWidgets import QWidget, QMainWindow
@@ -7,10 +6,10 @@ from PyQt6.QtWidgets import QWidget, QMainWindow
 from utils.db import JLCPCBDatabase, COLUMNS, ValueInvalid, PackageInvalid
 
 # import libraries
-import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import QThread, pyqtSignal
 
-from create_symbol import createResistorSymbol, createCapacitorSymbol
+from create_symbol import createResistorSymbol, createCapacitorSymbolSmall, createCapacitorSymbol, createResistorSymbolSmall
 
 import sys
 
@@ -18,6 +17,22 @@ import sys
 # Pass in sys.argv to allow command line arguments for your app.
 # If you know you won't use command line arguments QApplication([]) works too.
 app = QtWidgets.QApplication(sys.argv)
+
+
+class DatabaseUpdateWorker(QThread):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, db):
+        super().__init__()
+        self.db = db
+
+    def run(self):
+        try:
+            self.db.update()
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class MainWindow(QMainWindow):
@@ -30,9 +45,9 @@ class MainWindow(QMainWindow):
         self.layout = QtWidgets.QGridLayout(self.centralWidget)
         self.setLayout(self.layout)
         self.dataBaseStatus = QtWidgets.QLabel("- Database Status -")
-        self.layout.addWidget(self.dataBaseStatus, 0, 0)
+        self.layout.addWidget(self.dataBaseStatus, 0, 1, 1, 3)
         self.updateBtn = QtWidgets.QPushButton("Update Database")
-        self.layout.addWidget(self.updateBtn, 0, 1)
+        self.layout.addWidget(self.updateBtn, 0, 0)
         self.radio_buttons = QtWidgets.QButtonGroup()
         self.radio_buttons.setExclusive(True)
         self.radio1 = QtWidgets.QRadioButton("Capacitor")
@@ -41,12 +56,16 @@ class MainWindow(QMainWindow):
         self.layout.addWidget(self.radio2, 1, 1)
         self.radio_buttons.addButton(self.radio1)
         self.radio_buttons.addButton(self.radio2)
+        self.small_check = QtWidgets.QCheckBox("Small footprints")
+        self.small_check.setChecked(True)
+        self.layout.addWidget(self.small_check, 1, 3)
         self.layout.addWidget(QtWidgets.QLabel("Value"), 2, 0)
         self.value_input = QtWidgets.QLineEdit()
         self.layout.addWidget(self.value_input, 2, 1)
         self.layout.addWidget(QtWidgets.QLabel("Package"), 2, 2)
         self.package_input = QtWidgets.QLineEdit()
         self.layout.addWidget(self.package_input, 2, 3)
+
 
         self.output_table = QtWidgets.QTableWidget()
         self.output_table.setColumnCount(len(COLUMNS))
@@ -70,9 +89,21 @@ class MainWindow(QMainWindow):
         self.update_table()
 
     def updateDatabase(self):
-        self.db.update()
+        self.updateBtn.setEnabled(False)
+        self.dataBaseStatus.setText("Updating database...")
+        self.worker = DatabaseUpdateWorker(self.db)
+        self.worker.finished.connect(self.onUpdateFinished)
+        self.worker.error.connect(self.onUpdateError)
+        self.worker.start()
+
+    def onUpdateFinished(self):
+        self.updateBtn.setEnabled(True)
         self.update_table()
         self.updateDatabaseStatus()
+
+    def onUpdateError(self, error_msg):
+        self.updateBtn.setEnabled(True)
+        self.dataBaseStatus.setText(f"Update failed: {error_msg}")
 
     def updateDatabaseStatus(self):
         status = self.db.status()
@@ -116,10 +147,11 @@ class MainWindow(QMainWindow):
         package = self.output_table.item(row, COLUMNS.index("package")).text()
         lcsc = self.output_table.item(row, COLUMNS.index("lcsc")).text()
         voltage = self.output_table.item(row, COLUMNS.index("voltage")).text()
+        use_small_symbol = self.small_check.isChecked()
         if self.radio1.isChecked():
-            symbol = createCapacitorSymbol(value, package, lcsc, voltage)
+            symbol = createCapacitorSymbolSmall(value, package, lcsc, voltage) if use_small_symbol else createCapacitorSymbol(value, package, lcsc, voltage)
         else:
-            symbol = createResistorSymbol(value, package, lcsc)
+            symbol = createResistorSymbolSmall(value, package, lcsc) if use_small_symbol else createResistorSymbol(value, package, lcsc)
         # add symbol to clipboard
         clipboard = QtGui.QGuiApplication.clipboard()
         clipboard.setText(symbol)
