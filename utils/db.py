@@ -65,7 +65,7 @@ class JLCPCBDatabase:
 
         self.manufacturers = pd.read_sql_query("SELECT * from manufacturers", self.db)
         self.categories = pd.read_sql_query("SELECT * from categories", self.db)
-        self.basic = pd.read_sql_query("SELECT * from components WHERE basic = 1", self.db)
+        self.basic = pd.read_sql_query("SELECT * from components WHERE basic = 1 ORDER BY stock DESC", self.db)
         self.basic = pd.merge(self.basic, self.manufacturers, left_on='manufacturer_id', right_on='id')
         self.basic = pd.merge(self.basic, self.categories, left_on='category_id', right_on='id')
         self.basic = self.basic.rename(columns={'name': 'manufacturer'})

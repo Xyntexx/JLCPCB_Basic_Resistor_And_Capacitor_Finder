@@ -8,6 +8,7 @@ unit_prfixes = {
     "": Decimal(0),
     "m": Decimal(-3),
     "u": Decimal(-6),
+    "μ": Decimal(-6),  # Greek mu character
     "n": Decimal(-9),
     "p": Decimal(-12),
     "f": Decimal(-15),
@@ -41,18 +42,30 @@ def convertToPrefix(input_value, unit=""):
     return sign + str(input_value) + unit
 
 
-def convertToShorthandNotation(input_value:str):
+def convertToShorthandNotation(input_value: str):
     # convert from prefix to shorthand notation
-    if len(input_value.strip()) < 2:
+    if not input_value:
+        return ""
+    # divice the input value to value and unit
+    lastnum = -1
+    input_value = input_value.strip()
+    for i in range(len(input_value)):
+        if input_value[len(input_value) - i - 1].isdigit():
+            lastnum = len(input_value) - i
+            break
+    if lastnum == -1:
         return input_value
-    # find the decimal point
-    decimal_point = input_value.find(".")
+
+    value = input_value[:lastnum]
+    unit = input_value[lastnum:]
+    decimal_point = value.find(".")
+    if unit[0] in unit_prfixes:
+        unit = unit[0]
+    elif unit[0] == "Ω":
+        unit = "R"
+    else:
+        return input_value
+
     if decimal_point == -1:
-        if input_value[-1] == "Ω":
-            return input_value[:-1] + "R"
-        return input_value[:-1]
-    # find the unit prefix
-    unit_prefix = input_value[-2]
-    # replace the decimal point with the unit prefix
-    input_value = input_value[:decimal_point] + unit_prefix + input_value[decimal_point+1:-1]
-    return input_value[:-1]
+        return value + unit
+    return value[:decimal_point] + unit + value[decimal_point + 1:]
