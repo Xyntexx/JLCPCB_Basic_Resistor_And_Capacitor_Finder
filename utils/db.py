@@ -1,6 +1,6 @@
 import decimal, pathlib
 import sqlite3
-import pandas as pd
+import json
 from utils.units import convertToBaseUnits, convertToPrefix
 import create_database
 
@@ -60,30 +60,22 @@ class JLCPCBDatabase:
         if not self.status():
             raise FileNotFoundError("Database not found")
         self.db = sqlite3.connect(self.db_path)
+        self.db.row_factory = sqlite3.Row
         self.cursor = self.db.cursor()
         self.tables = self.get_tables()
 
-        self.manufacturers = pd.read_sql_query("SELECT * from manufacturers", self.db)
-        self.categories = pd.read_sql_query("SELECT * from categories", self.db)
-        self.basic = pd.read_sql_query("SELECT * from components WHERE basic = 1 ORDER BY stock DESC", self.db)
-        self.basic = pd.merge(self.basic, self.manufacturers, left_on='manufacturer_id', right_on='id')
-        self.basic = pd.merge(self.basic, self.categories, left_on='category_id', right_on='id')
-        self.basic = self.basic.rename(columns={'name': 'manufacturer'})
+        # Get category IDs for resistors and capacitors
+        self.cursor.execute("SELECT id FROM categories WHERE category = 'Resistors' LIMIT 1")
+        result = self.cursor.fetchone()
+        self.resistor_category_ids = [result[0]] if result else []
 
-        resistor_id = self.categories[self.categories['category'] == 'Resistors']['id'].values[0]
-        capacitor_id = self.categories[self.categories['subcategory'] == 'Multilayer Ceramic Capacitors MLCC - SMD/SMT']['id'].values[0]
-        self.resistors = self.basic[self.basic['category_id'] == resistor_id]
-        self.capacitors = self.basic[self.basic['category_id'] == capacitor_id]
+        # Get all resistor category IDs (there are multiple subcategories)
+        self.cursor.execute("SELECT id FROM categories WHERE category = 'Resistors'")
+        self.resistor_category_ids = [row[0] for row in self.cursor.fetchall()]
 
-        self.resistors['value'] = self.resistors['description'].apply(getUnitValue, unit="Ω", force_unit=True)
-        # add empty voltage column
-        self.resistors['voltage'] = ""
-        # remove all other columns except value and package
-        self.resistors = self.resistors[COLUMNS]
-        self.capacitors['value'] = self.capacitors['description'].apply(getUnitValue, unit="F", force_unit=True)
-        self.capacitors['voltage'] = self.capacitors['description'].apply(getUnitValue, unit="V", force_unit=True)
-        # remove all other columns except value and package
-        self.capacitors = self.capacitors[COLUMNS]
+        self.cursor.execute("SELECT id FROM categories WHERE subcategory = 'Multilayer Ceramic Capacitors MLCC - SMD/SMT'")
+        result = self.cursor.fetchone()
+        self.capacitor_category_id = result[0] if result else None
 
     def optimize(self):
         print("Optimizing database")
@@ -105,52 +97,232 @@ class JLCPCBDatabase:
         return self.cursor.fetchall()
 
     def get_resistors(self, value, package):
-        df = self.resistors.copy()
-        if value != "":
-            value = getUnitValue(value, "Ω")
-            df = self.resistors[self.resistors['value'] == value]
-        if value is None:
-            raise ValueInvalid("Value is Invalid")
-        if len(df) == 0:
-            # find the closest values
-            df = self.resistors.copy()
-            df['diff'] = df['value'].apply(lambda x: abs(x - value) if x is not None else None)
-            df = df.sort_values(by=['diff'])
-            df = df.head(10)
-        if package != "":
-            # check if the package is found in the description
-            df = df[df['description'].str.contains(package)]
-        if len(df) == 0:
-            raise PackageInvalid("Package is Invalid")
+        """Get resistors matching value and package. Returns list of dicts."""
+        target_value = None
 
-        df.loc[:, 'value'] = df['value'].apply(convertToPrefix, unit="Ω")
-        # convert to list of dicts
-        return df
+        if value != "":
+            target_value = getUnitValue(value, "Ω")
+            if target_value is None:
+                raise ValueInvalid("Value is Invalid")
+
+        # Build query
+        category_placeholders = ','.join(['?'] * len(self.resistor_category_ids))
+
+        if target_value is not None:
+            # Search for exact or close values
+            query = f"""
+            SELECT c.lcsc, c.description, c.package, m.name as manufacturer, c.stock, c.extra
+            FROM components c
+            JOIN manufacturers m ON c.manufacturer_id = m.id
+            WHERE c.category_id IN ({category_placeholders})
+            AND c.basic = 1
+            """
+            params = list(self.resistor_category_ids)
+
+            if package:
+                query += " AND c.package LIKE ?"
+                params.append(f"%{package}%")
+
+            query += " ORDER BY c.stock DESC LIMIT 100"
+
+            self.cursor.execute(query, params)
+            rows = self.cursor.fetchall()
+
+            # Parse values and find closest matches
+            results = []
+            for row in rows:
+                # Extract description from extra JSON field
+                description = row['description']
+                if not description and row['extra']:
+                    try:
+                        extra_data = json.loads(row['extra'])
+                        description = extra_data.get('description', '')
+                    except (json.JSONDecodeError, TypeError):
+                        description = ''
+
+                parsed_value = getUnitValue(description, "Ω", force_unit=True)
+                if parsed_value is not None:
+                    results.append({
+                        'lcsc': str(row['lcsc']),
+                        'description': description,
+                        'package': row['package'],
+                        'manufacturer': row['manufacturer'],
+                        'voltage': "",
+                        'value': parsed_value,
+                        'diff': abs(parsed_value - target_value)
+                    })
+
+            # Sort by difference and take top 10
+            results.sort(key=lambda x: x['diff'])
+            results = results[:10]
+
+            if not results:
+                raise ValueInvalid("Value is Invalid")
+
+            # Convert values to prefix notation
+            for r in results:
+                r['value'] = convertToPrefix(r['value'], unit="Ω")
+                del r['diff']
+
+            return results
+        else:
+            # No value specified, return all resistors
+            query = f"""
+            SELECT c.lcsc, c.description, c.package, m.name as manufacturer, c.extra
+            FROM components c
+            JOIN manufacturers m ON c.manufacturer_id = m.id
+            WHERE c.category_id IN ({category_placeholders})
+            AND c.basic = 1
+            """
+            params = list(self.resistor_category_ids)
+
+            if package:
+                query += " AND c.package LIKE ?"
+                params.append(f"%{package}%")
+
+            query += " ORDER BY c.stock DESC LIMIT 100"
+
+            self.cursor.execute(query, params)
+            rows = self.cursor.fetchall()
+
+            if not rows:
+                raise PackageInvalid("Package is Invalid")
+
+            results = []
+            for row in rows:
+                # Extract description from extra JSON field
+                description = row['description']
+                if not description and row['extra']:
+                    try:
+                        extra_data = json.loads(row['extra'])
+                        description = extra_data.get('description', '')
+                    except (json.JSONDecodeError, TypeError):
+                        description = ''
+
+                parsed_value = getUnitValue(description, "Ω", force_unit=True)
+                results.append({
+                    'lcsc': str(row['lcsc']),
+                    'description': description,
+                    'package': row['package'],
+                    'manufacturer': row['manufacturer'],
+                    'voltage': "",
+                    'value': convertToPrefix(parsed_value, unit="Ω") if parsed_value else ""
+                })
+
+            return results[:10]
 
     def get_capacitors(self, value: str, package: str):
-        # if value is empty return all capacitors
-        df = self.capacitors.copy()
+        """Get capacitors matching value, voltage and package. Returns list of dicts."""
+        target_value = None
+
         if value != "":
-            value = getUnitValue(value, "F")
-            df = self.capacitors[self.capacitors['value'] == value]
-        if value is None:
-            raise ValueInvalid("Value is Invalid")
-        if len(df) == 0:
-            # find the closest values
-            df = self.capacitors.copy()
-            df['diff'] = df['value'].apply(lambda x: abs(x - value) if x is not None else None)
-            df = df.sort_values(by=['diff'])
-            df = df.head(10)
-        if package != "":
-            # check if the package is found in the description
-            df = df[df['description'].str.contains(package)]
-        if len(df) == 0:
-            raise PackageInvalid("Package is Invalid")
+            target_value = getUnitValue(value, "F")
+            if target_value is None:
+                raise ValueInvalid("Value is Invalid")
 
-        df.loc[:, 'value'] = df['value'].apply(convertToPrefix, unit="F")
-        df.loc[:, 'voltage'] = df['voltage'].apply(convertToPrefix, unit="V")
-        # convert to list of dicts
-        return df
+        # Build query
+        if target_value is not None:
+            # Search for exact or close values
+            query = """
+            SELECT c.lcsc, c.description, c.package, m.name as manufacturer, c.stock, c.extra
+            FROM components c
+            JOIN manufacturers m ON c.manufacturer_id = m.id
+            WHERE c.category_id = ?
+            AND c.basic = 1
+            """
+            params = [self.capacitor_category_id]
 
-    def get_basic(self):
-        return self.basic
+            if package:
+                query += " AND c.package LIKE ?"
+                params.append(f"%{package}%")
+
+            query += " ORDER BY c.stock DESC LIMIT 100"
+
+            self.cursor.execute(query, params)
+            rows = self.cursor.fetchall()
+
+            # Parse values and find closest matches
+            results = []
+            for row in rows:
+                # Extract description from extra JSON field
+                description = row['description']
+                if not description and row['extra']:
+                    try:
+                        extra_data = json.loads(row['extra'])
+                        description = extra_data.get('description', '')
+                    except (json.JSONDecodeError, TypeError):
+                        description = ''
+
+                parsed_value = getUnitValue(description, "F", force_unit=True)
+                parsed_voltage = getUnitValue(description, "V", force_unit=True)
+                if parsed_value is not None:
+                    results.append({
+                        'lcsc': str(row['lcsc']),
+                        'description': description,
+                        'package': row['package'],
+                        'manufacturer': row['manufacturer'],
+                        'voltage': parsed_voltage,
+                        'value': parsed_value,
+                        'diff': abs(parsed_value - target_value)
+                    })
+
+            # Sort by difference and take top 10
+            results.sort(key=lambda x: x['diff'])
+            results = results[:10]
+
+            if not results:
+                raise ValueInvalid("Value is Invalid")
+
+            # Convert values to prefix notation
+            for r in results:
+                r['value'] = convertToPrefix(r['value'], unit="F")
+                r['voltage'] = convertToPrefix(r['voltage'], unit="V")
+                del r['diff']
+
+            return results
+        else:
+            # No value specified, return all capacitors
+            query = """
+            SELECT c.lcsc, c.description, c.package, m.name as manufacturer, c.extra
+            FROM components c
+            JOIN manufacturers m ON c.manufacturer_id = m.id
+            WHERE c.category_id = ?
+            AND c.basic = 1
+            """
+            params = [self.capacitor_category_id]
+
+            if package:
+                query += " AND c.package LIKE ?"
+                params.append(f"%{package}%")
+
+            query += " ORDER BY c.stock DESC LIMIT 100"
+
+            self.cursor.execute(query, params)
+            rows = self.cursor.fetchall()
+
+            if not rows:
+                raise PackageInvalid("Package is Invalid")
+
+            results = []
+            for row in rows:
+                # Extract description from extra JSON field
+                description = row['description']
+                if not description and row['extra']:
+                    try:
+                        extra_data = json.loads(row['extra'])
+                        description = extra_data.get('description', '')
+                    except (json.JSONDecodeError, TypeError):
+                        description = ''
+
+                parsed_value = getUnitValue(description, "F", force_unit=True)
+                parsed_voltage = getUnitValue(description, "V", force_unit=True)
+                results.append({
+                    'lcsc': str(row['lcsc']),
+                    'description': description,
+                    'package': row['package'],
+                    'manufacturer': row['manufacturer'],
+                    'voltage': convertToPrefix(parsed_voltage, unit="V") if parsed_voltage else "",
+                    'value': convertToPrefix(parsed_value, unit="F") if parsed_value else ""
+                })
+
+            return results[:10]

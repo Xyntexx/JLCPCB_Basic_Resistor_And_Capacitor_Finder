@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
             return
         if self.radio1.isChecked():
             try:
-                df = self.db.get_capacitors(self.value_input.text(), self.package_input.text())
+                results = self.db.get_capacitors(self.value_input.text(), self.package_input.text())
             except ValueInvalid:
                 self.value_input.setStyleSheet("background-color: red")
                 return
@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
                 return
         else:
             try:
-                df = self.db.get_resistors(self.value_input.text(), self.package_input.text())
+                results = self.db.get_resistors(self.value_input.text(), self.package_input.text())
             except ValueInvalid:
                 self.value_input.setStyleSheet("background-color: red")
                 return
@@ -134,10 +134,11 @@ class MainWindow(QMainWindow):
                 return
         self.value_input.setStyleSheet("")
         self.package_input.setStyleSheet("")
-        self.output_table.setRowCount(len(df))
-        for i in range(len(df)):
-            for j in range(len(COLUMNS)):
-                self.output_table.setItem(i, j, QtWidgets.QTableWidgetItem(str(df.iloc[i, j])))
+        self.output_table.setRowCount(len(results))
+        for i, row_dict in enumerate(results):
+            for j, col_name in enumerate(COLUMNS):
+                value = row_dict.get(col_name, "")
+                self.output_table.setItem(i, j, QtWidgets.QTableWidgetItem(str(value)))
         self.output_table.resizeColumnsToContents()
         self.output_table.resizeRowsToContents()
 
