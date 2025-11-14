@@ -1,4 +1,2 @@
-pyqt6-sip
 PyQt6
-pandas
 patool
