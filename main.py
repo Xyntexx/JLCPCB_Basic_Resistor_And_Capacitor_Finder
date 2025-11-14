@@ -3,7 +3,7 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import QWidget, QMainWindow
 
-from utils.db import JLCPCBDatabase, COLUMNS, ValueInvalid, PackageInvalid
+from utils.db import JLCPCBDatabase, COLUMNS, ValueInvalid, PackageInvalid, DatabaseSchemaError
 
 # import libraries
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -22,6 +22,7 @@ app = QtWidgets.QApplication(sys.argv)
 class DatabaseUpdateWorker(QThread):
     finished = pyqtSignal()
     error = pyqtSignal(str)
+    progress = pyqtSignal(str)
 
     def __init__(self, db):
         super().__init__()
@@ -29,9 +30,15 @@ class DatabaseUpdateWorker(QThread):
 
     def run(self):
         try:
-            self.db.update()
+            # Emit progress updates
+            self.progress.emit("Downloading and extracting database...")
+            # Skip optimization for faster updates (database will be larger but usable immediately)
+            self.db.update(skip_optimize=True)
             self.finished.emit()
         except Exception as e:
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            print(f"Database update error: {error_msg}")  # Also print to console
             self.error.emit(str(e))
 
 
@@ -44,10 +51,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.centralWidget)
         self.layout = QtWidgets.QGridLayout(self.centralWidget)
         self.setLayout(self.layout)
-        self.dataBaseStatus = QtWidgets.QLabel("- Database Status -")
-        self.layout.addWidget(self.dataBaseStatus, 0, 1, 1, 3)
         self.updateBtn = QtWidgets.QPushButton("Update Database")
         self.layout.addWidget(self.updateBtn, 0, 0)
+        self.dataBaseStatus = QtWidgets.QLabel("- Database Status -")
+        self.layout.addWidget(self.dataBaseStatus, 0, 1, 1, 3)
         self.radio_buttons = QtWidgets.QButtonGroup()
         self.radio_buttons.setExclusive(True)
         self.radio1 = QtWidgets.QRadioButton("Capacitor")
@@ -85,34 +92,50 @@ class MainWindow(QMainWindow):
         self.radio1.setChecked(True)
         if self.db.status():
             self.updateDatabaseStatus()
-            self.db.open()
+            try:
+                self.db.open()
+            except DatabaseSchemaError:
+                # Old database detected, show dialog prompting to update
+                self.dataBaseStatus.setText("Database is outdated. Please click 'Update Database' to download the latest version.")
+                self.dataBaseStatus.setStyleSheet("color: orange; font-weight: bold")
         self.update_table()
 
     def updateDatabase(self):
         self.updateBtn.setEnabled(False)
         self.dataBaseStatus.setText("Updating database...")
+        self.dataBaseStatus.setStyleSheet("color: blue; font-weight: bold")
         self.worker = DatabaseUpdateWorker(self.db)
         self.worker.finished.connect(self.onUpdateFinished)
         self.worker.error.connect(self.onUpdateError)
+        self.worker.progress.connect(self.onUpdateProgress)
         self.worker.start()
+
+    def onUpdateProgress(self, message):
+        self.dataBaseStatus.setText(message)
 
     def onUpdateFinished(self):
         self.updateBtn.setEnabled(True)
-        self.update_table()
+        self.dataBaseStatus.setStyleSheet("")  # Reset styling
         self.updateDatabaseStatus()
+        self.update_table()
 
     def onUpdateError(self, error_msg):
         self.updateBtn.setEnabled(True)
         self.dataBaseStatus.setText(f"Update failed: {error_msg}")
+        self.dataBaseStatus.setStyleSheet("color: red; font-weight: bold")
 
     def updateDatabaseStatus(self):
         status = self.db.status()
         if status:
-            self.dataBaseStatus.setText("Database last updated on: " + str(datetime.fromtimestamp(status)))
+            self.dataBaseStatus.setText("Database last updated: " + str(datetime.fromtimestamp(status)))
+            self.dataBaseStatus.setStyleSheet("")  # Reset to normal styling
         else:
-            self.dataBaseStatus.setText("Database not found")
+            self.dataBaseStatus.setText("Database not found - Click 'Update Database' to download")
+            self.dataBaseStatus.setStyleSheet("color: orange; font-weight: bold")
     def update_table(self):
         if not self.db.status():
+            return
+        if not self.db.db_open:
             return
         is_capacitor = self.radio1.isChecked()
         if is_capacitor:
