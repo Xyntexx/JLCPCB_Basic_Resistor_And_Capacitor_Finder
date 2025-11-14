@@ -6,6 +6,9 @@ import urllib.request
 import os
 import zipfile
 import glob
+import subprocess
+import sys
+import shutil
 
 CACHE_DIR = "cache_downloads"
 
@@ -36,42 +39,63 @@ def download_files():
 
 
 def create_database():
-    # Combine multi-part zip files and extract
-    print("Extracting multi-part zip archive...")
+    # Extract database from downloaded files
+    print("Extracting database archive...")
 
     # Check if split parts exist (cache.z01, cache.z02, etc.)
     split_parts = sorted(glob.glob(os.path.join(CACHE_DIR, "cache.z[0-9][0-9]")))
     zip_file = os.path.join(CACHE_DIR, "cache.zip")
 
     if split_parts:
-        # Multi-part zip: combine parts into a single file
-        print(f"Found {len(split_parts)} split parts, combining...")
-        combined_zip = os.path.join(CACHE_DIR, "cache_combined.zip")
-        with open(combined_zip, "wb") as combined:
-            # Write all split parts first
-            for part in split_parts:
-                print(f"  Adding {os.path.basename(part)}...")
-                with open(part, "rb") as f:
-                    combined.write(f.read())
-            # Write the final .zip part
-            print("  Adding cache.zip...")
-            with open(zip_file, "rb") as f:
-                combined.write(f.read())
+        # Multi-volume ZIP archive detected
+        print(f"Found {len(split_parts)} split archive parts")
 
-        # Extract the combined zip to current directory
-        print("Extracting combined archive...")
-        with zipfile.ZipFile(combined_zip, 'r') as zip_ref:
-            zip_ref.extractall(".")
+        try:
+            # Try using patoolib which can handle split archives via 7-Zip
+            import patoolib
+            print("Extracting using patoolib...")
+            patoolib.extract_archive(zip_file, outdir=".")
+            print("Extraction complete!")
 
-        # Clean up combined file
-        os.remove(combined_zip)
-        print("Extraction complete!")
+            # patoolib may extract to cache_1.sqlite3, rename if needed
+            if os.path.exists("cache_1.sqlite3") and not os.path.exists("cache.sqlite3"):
+                print("Renaming extracted database file...")
+                shutil.move("cache_1.sqlite3", "cache.sqlite3")
+            elif os.path.exists("cache_1.sqlite3") and os.path.exists("cache.sqlite3"):
+                # Replace old with new
+                os.remove("cache.sqlite3")
+                shutil.move("cache_1.sqlite3", "cache.sqlite3")
+
+        except ImportError:
+            print("ERROR: patoolib not installed.")
+            print("Please install it: pip install patool")
+            print("")
+            print("Or manually extract the archive using one of these methods:")
+            print(f"  1. Windows Explorer: Right-click '{zip_file}' -> Extract All")
+            print(f"  2. Install WinRAR or 7-Zip and extract '{zip_file}'")
+            raise
+        except Exception as e:
+            print(f"ERROR during extraction: {e}")
+            print("")
+            print("Please manually extract the archive using one of these methods:")
+            print(f"  1. Windows Explorer: Right-click '{zip_file}' -> Extract All")
+            print(f"  2. Install WinRAR or 7-Zip and extract '{zip_file}'")
+            raise
+
     else:
-        # Single zip file
-        print("Extracting single zip file...")
-        with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-            zip_ref.extractall(".")
-        print("Extraction complete!")
+        # Single ZIP file
+        print("Extracting single ZIP file...")
+        try:
+            with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+                zip_ref.extractall(".")
+            print("Extraction complete!")
+        except zipfile.BadZipFile as e:
+            if "span multiple disks" in str(e):
+                print("")
+                print("ERROR: This is a multi-volume ZIP archive.")
+                print("Please extract it manually using Windows Explorer, WinRAR, or 7-Zip.")
+                print(f"Right-click on '{zip_file}' and select 'Extract All' or 'Extract Here'.")
+            raise
 
 
 if __name__ == "__main__":

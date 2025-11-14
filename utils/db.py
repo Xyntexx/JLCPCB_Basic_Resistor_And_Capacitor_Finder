@@ -32,9 +32,15 @@ class PackageInvalid(Exception):
     pass
 
 
+class DatabaseSchemaError(Exception):
+    """Raised when database schema is outdated or incompatible"""
+    pass
+
+
 class JLCPCBDatabase:
     def __init__(self, db_path):
         self.db_path = db_path
+        self.db_open = False
 
     def status(self):
         # check if the database exists
@@ -47,18 +53,43 @@ class JLCPCBDatabase:
 
         return created
 
-    def update(self):
+    def check_schema(self):
+        """Check if database has the expected schema"""
+        try:
+            temp_db = sqlite3.connect(self.db_path)
+            cursor = temp_db.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='categories'")
+            result = cursor.fetchone()
+            temp_db.close()
+            return result is not None
+        except Exception:
+            return False
+
+    def update(self, skip_optimize=False):
         if hasattr(self, 'db'):
             self.db.close()
         create_database.download_files()
         create_database.create_database()
-        #update the database updated time
-        self.optimize()
+
+        # Optimization is optional - it removes non-basic components
+        # but can take 10-30 minutes on large databases
+        if not skip_optimize:
+            print("\nNOTE: Database optimization (removing non-basic components) will take 10-30 minutes.")
+            print("You can skip this by setting skip_optimize=True")
+            self.optimize()
+        else:
+            print("Skipping database optimization (database will be larger but usable immediately)")
+
         self.open()
 
     def open(self):
         if not self.status():
             raise FileNotFoundError("Database not found")
+
+        # Check schema before opening
+        if not self.check_schema():
+            raise DatabaseSchemaError("Database schema is outdated. Please update the database.")
+
         self.db = sqlite3.connect(self.db_path)
         self.db.row_factory = sqlite3.Row
         self.cursor = self.db.cursor()
@@ -77,14 +108,29 @@ class JLCPCBDatabase:
         result = self.cursor.fetchone()
         self.capacitor_category_id = result[0] if result else None
 
+        self.db_open = True
+
     def optimize(self):
-        print("Optimizing database")
+        print("Optimizing database (removing non-basic components)...")
+        print("This may take 10-30 minutes for large databases.")
         if not self.status():
             raise FileNotFoundError("Database not found")
         db = sqlite3.connect(self.db_path)
-        # delete everything except basic components
+        cursor = db.cursor()
+
+        # Check how many rows will be deleted
+        cursor.execute("SELECT COUNT(*) FROM components WHERE basic = 0")
+        count = cursor.fetchone()[0]
+        print(f"Removing {count:,} non-basic components...")
+
+        # Delete everything except basic components
         db.execute("DELETE FROM components WHERE basic = 0")
         db.commit()
+
+        # Vacuum to reclaim space (also takes time but reduces file size)
+        print("Reclaiming disk space (VACUUM)...")
+        db.execute("VACUUM")
+
         db.close()
         print("Database optimized")
 
