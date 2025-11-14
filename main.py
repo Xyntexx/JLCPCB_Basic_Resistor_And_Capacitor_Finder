@@ -7,7 +7,7 @@ from utils.db import JLCPCBDatabase, COLUMNS, ValueInvalid, PackageInvalid, Data
 
 # import libraries
 from PyQt6 import QtCore, QtGui, QtWidgets
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
 
 from create_symbol import createResistorSymbol, createCapacitorSymbolSmall, createCapacitorSymbol, createResistorSymbolSmall
 
@@ -40,6 +40,39 @@ class DatabaseUpdateWorker(QThread):
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
             print(f"Database update error: {error_msg}")  # Also print to console
             self.error.emit(str(e))
+
+
+class SearchWorker(QThread):
+    """Worker thread for non-blocking database searches"""
+    results_ready = pyqtSignal(list, bool)  # results, is_capacitor
+    search_error = pyqtSignal(str)
+
+    def __init__(self, db_path, is_capacitor, value, package):
+        super().__init__()
+        self.db_path = db_path
+        self.is_capacitor = is_capacitor
+        self.value = value
+        self.package = package
+
+    def run(self):
+        try:
+            # Create a new database connection in this thread
+            # SQLite connections cannot be shared across threads
+            db = JLCPCBDatabase(self.db_path)
+            db.open()
+
+            if self.is_capacitor:
+                results = db.get_capacitors(self.value, self.package)
+            else:
+                results = db.get_resistors(self.value, self.package)
+            self.results_ready.emit(results, self.is_capacitor)
+        except ValueInvalid:
+            self.search_error.emit("ValueInvalid")
+        except PackageInvalid:
+            self.search_error.emit("PackageInvalid")
+        except Exception as e:
+            print(f"Search error: {e}")
+            self.search_error.emit("Error")
 
 
 class MainWindow(QMainWindow):
@@ -83,9 +116,17 @@ class MainWindow(QMainWindow):
 
         self.db = JLCPCBDatabase("cache.sqlite3")
 
+        # Create debounce timer for search (300ms delay)
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self.update_table)
+
+        # Track active search worker
+        self.search_worker = None
+
         self.radio_buttons.buttonClicked.connect(self.update_table)
-        self.value_input.textChanged.connect(self.update_table)
-        self.package_input.textChanged.connect(self.update_table)
+        self.value_input.textChanged.connect(self.schedule_search)
+        self.package_input.textChanged.connect(self.schedule_search)
         self.output_table.cellDoubleClicked.connect(self.createSymbol)
         self.updateBtn.clicked.connect(self.updateDatabase)
 
@@ -117,6 +158,11 @@ class MainWindow(QMainWindow):
     def onUpdateProgress(self, message):
         self.dataBaseStatus.setText(message)
 
+    def schedule_search(self):
+        """Debounce search - wait 300ms after last keystroke before searching"""
+        self.search_timer.stop()
+        self.search_timer.start(300)
+
     def onUpdateFinished(self):
         self.updateBtn.setEnabled(True)
         self.dataBaseStatus.setStyleSheet("")  # Reset styling
@@ -141,25 +187,25 @@ class MainWindow(QMainWindow):
             return
         if not self.db.db_open:
             return
+
+        # Cancel any ongoing search
+        if self.search_worker and self.search_worker.isRunning():
+            self.search_worker.terminate()
+            self.search_worker.wait()
+
+        # Start async search
         is_capacitor = self.radio1.isChecked()
-        if is_capacitor:
-            try:
-                results = self.db.get_capacitors(self.value_input.text(), self.package_input.text())
-            except ValueInvalid:
-                self.value_input.setStyleSheet("background-color: red")
-                return
-            except PackageInvalid:
-                self.package_input.setStyleSheet("background-color: red")
-                return
-        else:
-            try:
-                results = self.db.get_resistors(self.value_input.text(), self.package_input.text())
-            except ValueInvalid:
-                self.value_input.setStyleSheet("background-color: red")
-                return
-            except PackageInvalid:
-                self.package_input.setStyleSheet("background-color: red")
-                return
+        value = self.value_input.text()
+        package = self.package_input.text()
+
+        self.search_worker = SearchWorker(self.db.db_path, is_capacitor, value, package)
+        self.search_worker.results_ready.connect(self.display_results, Qt.ConnectionType.QueuedConnection)
+        self.search_worker.search_error.connect(self.handle_search_error, Qt.ConnectionType.QueuedConnection)
+        self.search_worker.start()
+
+    def display_results(self, results, is_capacitor):
+        """Display search results in the table (runs in UI thread)"""
+        # Clear input styling
         self.value_input.setStyleSheet("")
         self.package_input.setStyleSheet("")
 
@@ -174,6 +220,15 @@ class MainWindow(QMainWindow):
                 self.output_table.setItem(i, j, QtWidgets.QTableWidgetItem(str(value)))
         self.output_table.resizeColumnsToContents()
         self.output_table.resizeRowsToContents()
+
+    def handle_search_error(self, error_type):
+        """Handle search errors by highlighting the appropriate input"""
+        if error_type == "ValueInvalid":
+            self.value_input.setStyleSheet("background-color: red")
+        elif error_type == "PackageInvalid":
+            self.package_input.setStyleSheet("background-color: red")
+        # Clear table on error
+        self.output_table.setRowCount(0)
 
     def createSymbol(self):
         row = self.output_table.currentRow()
