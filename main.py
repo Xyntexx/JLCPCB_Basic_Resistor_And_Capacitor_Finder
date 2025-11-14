@@ -90,14 +90,18 @@ class MainWindow(QMainWindow):
         self.updateBtn.clicked.connect(self.updateDatabase)
 
         self.radio1.setChecked(True)
+
+        # Always update database status on startup
+        self.updateDatabaseStatus()
+
         if self.db.status():
-            self.updateDatabaseStatus()
             try:
                 self.db.open()
             except DatabaseSchemaError:
                 # Old database detected, show dialog prompting to update
                 self.dataBaseStatus.setText("Database is outdated. Please click 'Update Database' to download the latest version.")
                 self.dataBaseStatus.setStyleSheet("color: orange; font-weight: bold")
+
         self.update_table()
 
     def updateDatabase(self):
