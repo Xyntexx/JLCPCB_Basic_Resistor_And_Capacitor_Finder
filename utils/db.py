@@ -169,7 +169,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 100"
+            query += " ORDER BY c.stock DESC LIMIT 30"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
@@ -226,7 +226,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 100"
+            query += " ORDER BY c.stock DESC LIMIT 30"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
@@ -282,7 +282,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 100"
+            query += " ORDER BY c.stock DESC LIMIT 30"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
@@ -341,7 +341,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 100"
+            query += " ORDER BY c.stock DESC LIMIT 30"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
