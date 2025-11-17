@@ -1,37 +1,40 @@
-# Documentation
-*.md
-CLI_USAGE.md
+# Database files
+*.sqlite3
+*.sqlite3-journal
+*.db
+*.db-journal
 
-# Component data
-components.json
-
-# Python
+# Cache and downloads
+cache_downloads/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
 
-# IDE
-.idea/
+# Python virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# IDE and editor files
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
+.DS_Store
 
-# Project specific
-cache.sqlite3
-cache.z*
-cache.zip
-cache_downloads/
-output.kicad_sym
-output.txt
-output.xlsx
-test_output.kicad_sym
-requirements.txt
-search_database.py
+# Temporary files
+*.tmp
+*.bak
+*.log
+nul
+test_user_method.zip
+cache_combined.zip
+cache_*.sqlite3
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
