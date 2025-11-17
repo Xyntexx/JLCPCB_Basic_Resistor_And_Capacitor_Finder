@@ -18,22 +18,27 @@ def profile_search(component_type, value, package):
     db_open_time = time.time() - start
     print(f"Database open: {db_open_time*1000:.1f}ms")
 
-    # Perform search
+    # Perform search with profiling
     start = time.time()
     if component_type == "resistor":
-        results = db.get_resistors(value, package)
+        results, timings = db.get_resistors(value, package, profile=True)
     else:
         results = db.get_capacitors(value, package)
+        timings = {}
     search_time = time.time() - start
 
-    print(f"Search query:  {search_time*1000:.1f}ms")
+    print(f"\nTotal search:  {search_time*1000:.1f}ms")
     print(f"Results found: {len(results)}")
-    print(f"Total time:    {(db_open_time + search_time)*1000:.1f}ms")
 
-    if results:
-        print(f"\nFirst result: {results[0]['lcsc']} - {results[0]['description']}")
+    # Detailed breakdown
+    if timings:
+        print("\nDetailed breakdown:")
+        for key, val in sorted(timings.items(), key=lambda x: -x[1]):
+            print(f"  {key:20s}: {val*1000:7.1f}ms ({val/search_time*100:5.1f}%)")
 
-    return search_time
+    print(f"\nTotal time (incl DB open): {(db_open_time + search_time)*1000:.1f}ms")
+
+    return search_time, timings
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
@@ -53,10 +58,12 @@ if __name__ == "__main__":
     print("="*60)
 
     times = []
+    all_timings = []
     for i in range(3):
         print(f"\n[Run {i+1}/3]")
-        t = profile_search(component_type, value, package)
+        t, timings = profile_search(component_type, value, package)
         times.append(t)
+        all_timings.append(timings)
         time.sleep(0.5)
 
     print("\n" + "="*60)
