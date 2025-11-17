@@ -142,12 +142,17 @@ class JLCPCBDatabase:
         self.cursor.execute("PRAGMA table_info({})".format(table_name))
         return self.cursor.fetchall()
 
-    def get_resistors(self, value, package):
+    def get_resistors(self, value, package, profile=False):
         """Get resistors matching value and package. Returns list of dicts."""
+        import time
+        timings = {} if profile else None
+
         target_value = None
 
         if value != "":
+            start = time.time()
             target_value = getUnitValue(value, "Ω")
+            if profile: timings['parse_input'] = time.time() - start
             if target_value is None:
                 raise ValueInvalid("Value is Invalid")
 
@@ -171,22 +176,33 @@ class JLCPCBDatabase:
 
             query += " ORDER BY c.stock DESC LIMIT 30"
 
+            start = time.time()
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
+            if profile: timings['sql_query'] = time.time() - start
 
             # Parse values and find closest matches
             results = []
+            json_time = 0
+            parse_time = 0
+
+            start = time.time()
             for row in rows:
                 # Extract description from extra JSON field
                 description = row['description']
                 if not description and row['extra']:
+                    json_start = time.time()
                     try:
                         extra_data = json.loads(row['extra'])
                         description = extra_data.get('description', '')
                     except (json.JSONDecodeError, TypeError):
                         description = ''
+                    json_time += time.time() - json_start
 
+                parse_start = time.time()
                 parsed_value = getUnitValue(description, "Ω", force_unit=True)
+                parse_time += time.time() - parse_start
+
                 if parsed_value is not None:
                     results.append({
                         'lcsc': str(row['lcsc']),
@@ -198,18 +214,29 @@ class JLCPCBDatabase:
                         'diff': abs(parsed_value - target_value)
                     })
 
+            if profile:
+                timings['row_processing'] = time.time() - start
+                timings['json_parsing'] = json_time
+                timings['value_extraction'] = parse_time
+
             # Sort by difference and take top 10
+            start = time.time()
             results.sort(key=lambda x: x['diff'])
             results = results[:10]
+            if profile: timings['sorting'] = time.time() - start
 
             if not results:
                 raise ValueInvalid("Value is Invalid")
 
             # Convert values to prefix notation
+            start = time.time()
             for r in results:
                 r['value'] = convertToPrefix(r['value'], unit="Ω")
                 del r['diff']
+            if profile: timings['format_output'] = time.time() - start
 
+            if profile:
+                return results, timings
             return results
         else:
             # No value specified, return all resistors
