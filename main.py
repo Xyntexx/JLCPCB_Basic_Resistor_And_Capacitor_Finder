@@ -116,7 +116,7 @@ class MainWindow(QMainWindow):
 
         self.db = JLCPCBDatabase("cache.sqlite3")
 
-        # Create debounce timer for search (300ms delay)
+        # Create debounce timer for search (150ms delay - search is very fast now)
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.update_table)
@@ -159,9 +159,9 @@ class MainWindow(QMainWindow):
         self.dataBaseStatus.setText(message)
 
     def schedule_search(self):
-        """Debounce search - wait 300ms after last keystroke before searching"""
+        """Debounce search - wait 150ms after last keystroke before searching"""
         self.search_timer.stop()
-        self.search_timer.start(300)
+        self.search_timer.start(150)
 
     def onUpdateFinished(self):
         self.updateBtn.setEnabled(True)
