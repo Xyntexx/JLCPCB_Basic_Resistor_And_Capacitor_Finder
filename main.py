@@ -149,6 +149,11 @@ class MainWindow(QMainWindow):
         self.updateBtn.setEnabled(False)
         self.dataBaseStatus.setText("Updating database...")
         self.dataBaseStatus.setStyleSheet("color: blue; font-weight: bold")
+        # Close the database connection before updating (SQLite connections
+        # cannot be shared across threads)
+        if self.db.db_open and hasattr(self.db, 'db'):
+            self.db.db.close()
+            self.db.db_open = False
         self.worker = DatabaseUpdateWorker(self.db)
         self.worker.finished.connect(self.onUpdateFinished)
         self.worker.error.connect(self.onUpdateError)
@@ -166,6 +171,13 @@ class MainWindow(QMainWindow):
     def onUpdateFinished(self):
         self.updateBtn.setEnabled(True)
         self.dataBaseStatus.setStyleSheet("")  # Reset styling
+        # Reopen the database connection in the main thread
+        try:
+            self.db.open()
+        except Exception as e:
+            self.dataBaseStatus.setText(f"Failed to open database: {e}")
+            self.dataBaseStatus.setStyleSheet("color: red; font-weight: bold")
+            return
         self.updateDatabaseStatus()
         self.update_table()
 

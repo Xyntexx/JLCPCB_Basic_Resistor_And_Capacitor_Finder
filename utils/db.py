@@ -66,8 +66,10 @@ class JLCPCBDatabase:
             return False
 
     def update(self, skip_optimize=False):
-        if hasattr(self, 'db'):
-            self.db.close()
+        # Note: Do not close/open connections here - this method may run in a
+        # worker thread, and SQLite connections cannot be shared across threads.
+        # The caller should close the connection before calling update() and
+        # reopen it after update() completes.
         create_database.download_files()
         create_database.create_database()
 
@@ -79,8 +81,6 @@ class JLCPCBDatabase:
             self.optimize()
         else:
             print("Skipping database optimization (database will be larger but usable immediately)")
-
-        self.open()
 
     def open(self):
         if not self.status():
@@ -174,7 +174,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 30"
+            query += " ORDER BY c.stock DESC"
 
             start = time.time()
             self.cursor.execute(query, params)
@@ -253,7 +253,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 30"
+            query += " ORDER BY c.stock DESC LIMIT 10"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
@@ -282,7 +282,7 @@ class JLCPCBDatabase:
                     'value': convertToPrefix(parsed_value, unit="Ω") if parsed_value else ""
                 })
 
-            return results[:10]
+            return results
 
     def get_capacitors(self, value: str, package: str):
         """Get capacitors matching value, voltage and package. Returns list of dicts."""
@@ -309,7 +309,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 30"
+            query += " ORDER BY c.stock DESC"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
@@ -368,7 +368,7 @@ class JLCPCBDatabase:
                 query += " AND c.package LIKE ?"
                 params.append(f"%{package}%")
 
-            query += " ORDER BY c.stock DESC LIMIT 30"
+            query += " ORDER BY c.stock DESC LIMIT 10"
 
             self.cursor.execute(query, params)
             rows = self.cursor.fetchall()
@@ -398,4 +398,4 @@ class JLCPCBDatabase:
                     'value': convertToPrefix(parsed_value, unit="F") if parsed_value else ""
                 })
 
-            return results[:10]
+            return results
